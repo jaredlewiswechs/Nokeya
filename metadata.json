@@ -1,0 +1,7 @@
+{
+  "name": "NoKeypedia",
+  "description": "A verification-first, keyless API directory and intelligent router built on the Newton deterministic substrate. Search, test, and integrate free APIs without keys, all backed by an immutable ledger.",
+  "requestFramePermissions": [
+    "geolocation"
+  ]
+}
