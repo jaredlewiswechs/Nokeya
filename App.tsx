@@ -4,7 +4,7 @@ import { db } from './db';
 import { ApiCard, LedgerEvent, AppState, NewtonReceipt } from './types';
 import { SEED_APIS } from './constants';
 import { runApiTest } from './services/testRunner';
-import { parseIntent, generateReceipt } from './services/geminiService';
+import { parseIntent, generateReceipt, chatWithAI } from './services/geminiService';
 import { logEvent } from './services/ledgerService';
 
 // --- Sub-components ---
@@ -122,6 +122,10 @@ export default function App() {
   const [askQuery, setAskQuery] = useState('');
   const [receipt, setReceipt] = useState<NewtonReceipt | null>(null);
   const [useProxy, setUseProxy] = useState(false);
+  const [chatMessages, setChatMessages] = useState<{ role: string; content: string }[]>([]);
+  const [chatInput, setChatInput] = useState('');
+  const [chatLoading, setChatLoading] = useState(false);
+  const [askMode, setAskMode] = useState<'route' | 'chat'>('route');
 
   useEffect(() => {
     const init = async () => {
@@ -154,7 +158,7 @@ export default function App() {
   const handleAsk = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!askQuery) return;
-    setLoading("Parsing intent via Gemini...");
+    setLoading("Parsing intent via Puter AI...");
     setReceipt(null);
 
     try {
@@ -189,6 +193,28 @@ export default function App() {
     }
     await refreshData();
     setLoading(null);
+  };
+
+  const handleChat = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!chatInput.trim()) return;
+
+    const userMessage = { role: 'user', content: chatInput };
+    const updatedMessages = [...chatMessages, userMessage];
+    setChatMessages(updatedMessages);
+    setChatInput('');
+    setChatLoading(true);
+
+    try {
+      const reply = await chatWithAI(updatedMessages);
+      setChatMessages(prev => [...prev, { role: 'assistant', content: reply }]);
+      await logEvent("AI_CHAT", "RouteQuery", "chat", `Chat: "${chatInput.slice(0, 50)}..."`, { query: chatInput });
+    } catch (err) {
+      console.error(err);
+      setChatMessages(prev => [...prev, { role: 'assistant', content: 'Sorry, I encountered an error. Please try again.' }]);
+    } finally {
+      setChatLoading(false);
+    }
   };
 
   const availableFilters = useMemo(() => {
@@ -437,36 +463,139 @@ export default function App() {
         )}
 
         {activeTab === 'ask' && (
-          <div className="max-w-4xl mx-auto space-y-12 animate-in fade-in zoom-in-95 duration-500">
+          <div className="max-w-4xl mx-auto space-y-8 animate-in fade-in zoom-in-95 duration-500">
             <div className="text-center space-y-4">
               <h2 className="text-3xl md:text-5xl font-black tracking-tighter text-slate-900">What is your intent?</h2>
-              <p className="text-slate-400 font-medium md:text-lg">Describe the data you need. Newton will route you.</p>
+              <p className="text-slate-400 font-medium md:text-lg">Describe the data you need. Newton will route you — or chat with our AI.</p>
             </div>
-            
-            <form onSubmit={handleAsk} className="space-y-6">
-              <div className="relative">
-                <textarea 
-                  placeholder="e.g., 'I want to fetch current weather for London and display it in a React component without needing an API key...'"
-                  value={askQuery}
-                  onChange={(e) => setAskQuery(e.target.value)}
-                  className="w-full p-8 bg-white border border-slate-200 rounded-[40px] text-lg md:text-xl min-h-[180px] shadow-2xl shadow-blue-50 focus:ring-4 focus:ring-blue-100 focus:border-blue-500 outline-none transition-all resize-none leading-relaxed"
-                />
-                <button 
-                  type="submit"
-                  disabled={!askQuery}
-                  className="absolute bottom-6 right-6 p-5 bg-blue-600 text-white rounded-full shadow-2xl hover:bg-blue-700 disabled:opacity-50 disabled:grayscale transition-all hover:scale-105 active:scale-95"
-                >
-                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M14 5l7 7m0 0l-7 7m7-7H3"></path></svg>
-                </button>
-              </div>
-              <div className="flex flex-wrap justify-center gap-3">
-                {['NO KEYS', 'KEYLESS AUTH', 'CORS ENABLED', 'VERIFIED UPTIME'].map(label => (
-                  <span key={label} className="text-[10px] font-black text-slate-400 bg-white border border-slate-200 px-4 py-1.5 rounded-full uppercase tracking-widest shadow-sm">{label}</span>
-                ))}
-              </div>
-            </form>
 
-            {receipt && <NewtonReceiptView receipt={receipt} />}
+            <div className="flex justify-center gap-2">
+              <button
+                onClick={() => setAskMode('route')}
+                className={`px-6 py-2.5 rounded-full text-xs font-black uppercase tracking-widest transition-all ${
+                  askMode === 'route'
+                    ? 'bg-blue-600 text-white shadow-lg shadow-blue-200'
+                    : 'bg-white text-slate-400 border border-slate-200 hover:border-slate-300'
+                }`}
+              >
+                Route Intent
+              </button>
+              <button
+                onClick={() => setAskMode('chat')}
+                className={`px-6 py-2.5 rounded-full text-xs font-black uppercase tracking-widest transition-all ${
+                  askMode === 'chat'
+                    ? 'bg-blue-600 text-white shadow-lg shadow-blue-200'
+                    : 'bg-white text-slate-400 border border-slate-200 hover:border-slate-300'
+                }`}
+              >
+                Chat with Newton
+              </button>
+            </div>
+
+            {askMode === 'route' && (
+              <div className="space-y-6">
+                <form onSubmit={handleAsk} className="space-y-6">
+                  <div className="relative">
+                    <textarea
+                      placeholder="e.g., 'I want to fetch current weather for London and display it in a React component without needing an API key...'"
+                      value={askQuery}
+                      onChange={(e) => setAskQuery(e.target.value)}
+                      className="w-full p-8 bg-white border border-slate-200 rounded-[40px] text-lg md:text-xl min-h-[180px] shadow-2xl shadow-blue-50 focus:ring-4 focus:ring-blue-100 focus:border-blue-500 outline-none transition-all resize-none leading-relaxed"
+                    />
+                    <button
+                      type="submit"
+                      disabled={!askQuery}
+                      className="absolute bottom-6 right-6 p-5 bg-blue-600 text-white rounded-full shadow-2xl hover:bg-blue-700 disabled:opacity-50 disabled:grayscale transition-all hover:scale-105 active:scale-95"
+                    >
+                      <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M14 5l7 7m0 0l-7 7m7-7H3"></path></svg>
+                    </button>
+                  </div>
+                  <div className="flex flex-wrap justify-center gap-3">
+                    {['NO KEYS', 'PUTER AI', 'CORS ENABLED', 'VERIFIED UPTIME'].map(label => (
+                      <span key={label} className="text-[10px] font-black text-slate-400 bg-white border border-slate-200 px-4 py-1.5 rounded-full uppercase tracking-widest shadow-sm">{label}</span>
+                    ))}
+                  </div>
+                </form>
+                {receipt && <NewtonReceiptView receipt={receipt} />}
+              </div>
+            )}
+
+            {askMode === 'chat' && (
+              <div className="space-y-4">
+                <div className="bg-white rounded-[32px] border border-slate-200 shadow-2xl shadow-blue-50 overflow-hidden">
+                  <div className="h-[400px] md:h-[500px] overflow-y-auto p-6 space-y-4">
+                    {chatMessages.length === 0 && (
+                      <div className="flex items-center justify-center h-full">
+                        <div className="text-center space-y-3">
+                          <div className="text-slate-200 text-6xl font-black tracking-tighter select-none">Newton</div>
+                          <p className="text-slate-400 text-sm">Ask me anything about keyless APIs, integration patterns, or REST best practices.</p>
+                          <div className="flex flex-wrap justify-center gap-2 pt-2">
+                            {['What weather APIs are free?', 'How do I use Open-Meteo?', 'Best keyless geo APIs'].map(suggestion => (
+                              <button
+                                key={suggestion}
+                                onClick={() => setChatInput(suggestion)}
+                                className="text-[11px] font-bold text-blue-500 bg-blue-50 px-4 py-2 rounded-full hover:bg-blue-100 transition-colors"
+                              >
+                                {suggestion}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                    {chatMessages.map((msg, i) => (
+                      <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                        <div className={`max-w-[80%] px-5 py-3.5 rounded-3xl text-sm leading-relaxed ${
+                          msg.role === 'user'
+                            ? 'bg-blue-600 text-white rounded-br-lg'
+                            : 'bg-slate-100 text-slate-800 rounded-bl-lg border border-slate-200'
+                        }`}>
+                          <div className="whitespace-pre-wrap">{msg.content}</div>
+                        </div>
+                      </div>
+                    ))}
+                    {chatLoading && (
+                      <div className="flex justify-start">
+                        <div className="bg-slate-100 text-slate-500 px-5 py-3.5 rounded-3xl rounded-bl-lg border border-slate-200 text-sm">
+                          <div className="flex items-center gap-2">
+                            <div className="w-2 h-2 bg-blue-400 rounded-full animate-pulse"></div>
+                            <div className="w-2 h-2 bg-blue-400 rounded-full animate-pulse" style={{ animationDelay: '0.2s' }}></div>
+                            <div className="w-2 h-2 bg-blue-400 rounded-full animate-pulse" style={{ animationDelay: '0.4s' }}></div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  <form onSubmit={handleChat} className="border-t border-slate-100 p-4 flex gap-3">
+                    <input
+                      type="text"
+                      value={chatInput}
+                      onChange={(e) => setChatInput(e.target.value)}
+                      placeholder="Ask Newton about keyless APIs..."
+                      className="flex-1 px-5 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-400 transition-all"
+                      disabled={chatLoading}
+                    />
+                    <button
+                      type="submit"
+                      disabled={!chatInput.trim() || chatLoading}
+                      className="p-3 bg-blue-600 text-white rounded-2xl hover:bg-blue-700 disabled:opacity-50 transition-all hover:scale-105 active:scale-95"
+                    >
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 19V5m0 0l-7 7m7-7l7 7"></path></svg>
+                    </button>
+                  </form>
+                </div>
+
+                <div className="flex justify-center">
+                  <button
+                    onClick={() => setChatMessages([])}
+                    className="text-[10px] font-black text-slate-400 uppercase tracking-widest hover:text-slate-600 transition-colors"
+                  >
+                    Clear Conversation
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
